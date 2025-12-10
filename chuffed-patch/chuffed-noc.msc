@@ -1,0 +1,19 @@
+{
+    "executable": "/home/chalo/.local/bin/fzn-chuffed",
+    "id": "chuffed-noc",
+    "inputType": "FZN",
+    "isGUIApplication": false,
+    "mznlib": "/home/chalo/.local/share/minizinc/chuffed",
+    "name": "Chuffed-NOC",
+    "needsSolns2Out": true,
+    "stdFlags": [
+        "-a",
+        "-n",
+        "-s",
+        "-v",
+        "-r",
+        "-f",
+        "-t"
+    ],
+    "version": "0.0.1"
+}
