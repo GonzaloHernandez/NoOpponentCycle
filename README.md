@@ -20,9 +20,11 @@ To compile and run code under mzn-python and sat-solvers, first set up a Python 
 
 2. Install required dependencies:
 
-   pip install minizinc  
-   pip install python-sat  
-   pip install ortools  
+   ```bash
+    pip install minizinc
+    pip install python-sat
+    pip install ortools
+    ```  
 
 ## Graphical View of Automatons
 
@@ -31,24 +33,26 @@ https://github.com/GonzaloHernandez/graphing
 
 ## Chuffed Setup and NoOpponentCycle Compilation
 
-1. Install Chuffed as a Library
+1. Install Chuffed as a Library. Clone and install Chuffed
 
-Clone and install Chuffed (recommended branch: 0.12.1):
-
+    ```bash
     git clone --branch 0.12.1 https://github.com/chuffed/chuffed.git
     cmake -B build -S . -DCMAKE_INSTALL_PREFIX=/home/<user>/.local
     cmake --build build --target install
+    ```  
 
 2. Compile NoOpponentCycle
 
+    ```bash
     mkdir build
     g++ -std=c++17 various/*.cpp experiments/ex3.cpp -o build/noc \
         -I/home/<user>/.local/include \
         -L/home/<user>/.local/lib \
         -lchuffed_fzn -lchuffed
+    ```  
 
-3. Example Executions
-
+4. Example Executions
+    ```bash
     ./build/noc --help
     ./build/noc --dzn data/wiki.dzn --print-game
     ./build/noc --dzn data/wiki.dzn --noc-even --filter-eager --print-times
@@ -56,6 +60,7 @@ Clone and install Chuffed (recommended branch: 0.12.1):
     ./build/noc --rand 10 5 2 4 --noc-odd --filter-memo --print-times
     ./build/noc --rand 20 10 1 5 --print-times --export-dimacs game.cnf
     sh ./resources/noc-parallel.sh --jurd 5000 10 --min --print-times --filter-eager
+    ```  
 
 ## SAT/SMT Solver Support
 
@@ -69,10 +74,11 @@ Install the following external solvers if you want to solve DIMACS output (game.
 - OR-Tools: https://github.com/google/or-tools  
 
 Example usage:
-
+    ```bash
     cadical game.cnf
     kissat game.cnf
     zchaff game.cnf
+    ```  
 
 ## MiniZinc Support
 
@@ -85,21 +91,23 @@ To enable custom FlatZinc backend support:
 
 1. From the chuffed-patch folder:
 
-    - Copy game.h and noc.h into chuffed/support
-    - Apply flatzinc-NOC.patch to the Chuffed repository
+    - Copy `game.h` and `noc.h` into `chuffed/support`
+    - Apply `flatzinc-NOC.patch` to the Chuffed repository
 
 2. Rebuild Chuffed:
-
+    ```bash
     cmake -B build -S . -DCMAKE_INSTALL_PREFIX=/home/<user>/.local
     cmake --build build --target install
+    ```  
 
 3. Use chuffed-noc.msc as the solver configuration in MiniZinc
 
-    Modify the file with the correct path as appropriate
+    Modify `chuffed-noc.msc` with the correct path as appropriate
 
 4. Example:
-
+    ```bash
     minizinc model/cp-based-extended.mzn data/jurd-2-1.dzn --solver chuffed-patch/chuffed-noc.msc
+    ```  
 
 5. See more examples in the model/ and mzn-python/ folders
 
@@ -107,9 +115,10 @@ To enable custom FlatZinc backend support:
 
 - The reduction-sat.mzn model is designed only from the EVEN player's perspective.
 - MiniZinc solvers (drivers):
-    0 = Gecode
-    1 = Chuffed
-    2 = cpsattlp
-    3 = chuffed-noc (custom patched)
+
+    - 0 = Gecode
+    - 1 = Chuffed
+    - 2 = cpsattlp
+    - 3 = chuffed-noc (custom patched)
 
 To use driver 3, ensure chuffed-noc.msc is configured (typically in ~/.minizinc/solvers).
