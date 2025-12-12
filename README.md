@@ -6,7 +6,7 @@ This repository propose a constraint-based approach for parity games, built upon
 
 The workspace contains the following folders:
 
-- data:        Input data files for MiniZinc and interative automatons created using Graphing
+- data:        Input data files for MiniZinc and interative graphs created using Graphing
 - mzn_model:   MiniZinc model files
 - mzn_python:  Python code that interacts with MiniZinc
 - sat-solvers: Alternative implementations using OR-Tools or PySAT
@@ -26,9 +26,9 @@ To compile and run code under mzn-python and sat-solvers, first set up a Python 
     pip install ortools
     ```  
 
-## Graphical View of Automatons
+## Graphical View of Graphs
 
-To view automatons, use the Graphing application:
+To interact with the games, use the Graphing application:
 https://github.com/GonzaloHernandez/graphing
 
 ## Chuffed Setup and NoOpponentCycle Compilation
