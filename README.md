@@ -1,3 +1,10 @@
+> [!WARNING]
+> **This repository has been moved!**
+> 
+> `/NoOpponentCycle` is no longer actively maintained here. The project has been migrated to a new, fully supported repository: **[/nocq](https://github.com/gonzalohernandez/nocq)**.
+>
+> Please update your bookmarks, clones, and dependencies to the new location to receive the latest updates and bug fixes.
+
 ## About No-Opponent-Cycle propagators
 
 This repository propose a constraint-based approach for parity games, built upon a new propagation algorithm that eliminates opponent cycles from the game graph. This approach results in an efficient method that exploits the duality of players in a parity game.
