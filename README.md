@@ -1,124 +1,159 @@
-## About No-Opponent-Cycle propagators
+NOCQ is a high-performance C++ tool designed for solving parity games with quantitative conditions. It combines classic graph-based algorithms with modern **Constraint Programming (CP)** and **SAT** techniques. By default, models are solved using the *Chuffed* solver, with *Gecode* and *CaDiCaL* also integrated as optional backends.
 
-This repository propose a constraint-based approach for parity games, built upon a new propagation algorithm that eliminates opponent cycles from the game graph. This approach results in an efficient method that exploits the duality of players in a parity game.
+## Project Structure
 
-## Folder Structure
+* `src/main.cpp`:   Main entry point and CLI logic.
+* `src/cp_nocq/`:   CP Models and Propagators.
+* `src/utils/`:     Core implementations and additional algorithms.
+* `thirdparty/`:    External dependencies (includes a local copy of the Chuffed solver).
+* `resources/`:     Script for solving in parallel from EVEN and ODD perspective.
+* `examples/`:      DZN and GMW files as examples. 
+                    Includes AUD files to edit arenas (Requires 
+                    [Graphing](https://github.com/GonzaloHernandez/graphing)).
 
-The workspace contains the following folders:
+## Prerequisites
 
-- data:        Input data files for MiniZinc and interative graphs created using Graphing
-- mzn_model:   MiniZinc model files
-- mzn_python:  Python code that interacts with MiniZinc
-- sat-solvers: Alternative implementations using OR-Tools or PySAT
+To build NOCQ, you need a Linux environment (tested on Arch Linux) with:
+* **CMake** (v3.10 or higher)
+* **GCC/G++** (v11 or higher, supporting C++17)
+* **Bison** and **Flex** (required for building Chuffed)
+* **Pthreads** library
 
-## Virtual Environment
+## Installation & Building
 
-To compile and run code under mzn-python and sat-solvers, first set up a Python virtual environment:
+**NOCQ** utilizes a CMake Superbuild system to automatically fetch and compile the Chuffed solver alongside the tool.
 
-1. Press Ctrl+Shift+P in your IDE and select:
-   Python: Create Environment (Venv)
+```bash
+mkdir build
+cd build
+cmake .. [options]
+cmake --build .
+```
 
-2. Install required dependencies:
+**Build options**
 
-   ```bash
-    pip install minizinc
-    pip install python-sat
-    pip install ortools
-    ```  
+You can customize the build by passing variables to the cmake command using the -D flag:
 
-## Graphical View of Graphs
+- `ENABLE_GECODE`: Include support for the Gecode solver (Requires version >= 6.2). Default=`OFF`
+- `ENABLE_CADICAL`: Include support for the Cadical solver (Requires version >= 2.0). Default=`OFF`
+- `USE_SYSTEM_CHUFFED`: Use a system-installed version instead of the bundled version (Requires version >= 0.13.2). Default=`OFF` (the bundled version will be used)
+- `CMAKE_PREFIX_PATH=<directory>`: Specify custom directories for library searching (e.g., /opt).
 
-To interact with the games, use the Graphing application:
-https://github.com/GonzaloHernandez/graphing
+### Docker (Cross-Platform)
+To ensure all dependencies are correctly configured without modifying your host system, we provide a Dockerfile.  From the root directory of the project, run:
 
-## Chuffed Setup and NoOpponentCycle Compilation
+```bash
+docker build -t nocq .
+```
+For more information on containers, visit [Docker.com](https://www.docker.com/).
 
-1. Install Chuffed as a Library. Clone and install Chuffed
+## Usage
 
-    ```bash
-    git clone --branch 0.12.1 https://github.com/chuffed/chuffed.git
-    cmake -B build -S . -DCMAKE_INSTALL_PREFIX=/home/<user>/.local
-    cmake --build build --target install
-    ```  
+Run NOCQ using the following syntax:
 
-2. Compile NoOpponentCycle
+```bash
+./nocq [options]
+```
+or
+```bash
+docker run --rm -it nocq [options]
+```
 
-    ```bash
-    mkdir build
-    g++ -std=c++17 various/*.cpp experiments/ex3.cpp -o build/noc \
-        -I/home/<user>/.local/include \
-        -L/home/<user>/.local/lib \
-        -lchuffed_fzn -lchuffed
-    ```  
+### Input & Game Generation
 
-4. Example Executions
-    ```bash
-    ./build/noc --help
-    ./build/noc --dzn data/wiki.dzn --print-game
-    ./build/noc --dzn data/wiki.dzn --noc-even --filter-eager --print-times
-    ./build/noc --jurd 3 2 --noc-odd --export-gm game.gm --print-time
-    ./build/noc --rand 10 5 2 4 --noc-odd --filter-memo --print-times
-    ./build/noc --rand 20 10 1 5 --print-times --export-dimacs game.cnf
-    sh ./resources/noc-parallel.sh --jurd 5000 10 --min --print-times --filter-eager
-    ```  
+NOCQ can solve games from files or generate standard benchmarks on the fly:
 
-## SAT/SMT Solver Support
+**From File:**
+* `--dzn <filename>`: Load a game from a MiniZinc data file (.dzn).
+* `--gm <filename>`: Load a game from a PGSolver format file (.gm/.gmw).
 
-Install the following external solvers if you want to solve DIMACS output (game.cnf):
+**Benchmark Generators:**
+* `--jurd <l> <b>`: Generate a Jurdzinski game with $l$ levels and $b$ blocks.
+* `--rand <n> <p> <d1> <d2>`: Generate a random parity game with $n$ vertices, a maximum priority $p$, and outgoing degrees between $d_1$ and $d_2$.
+* `--mladder <b>`: Generate a Modelchecker Ladder game with $b$ blocks.
+* `--sprang <n> <d>`: Generate a random game with $n$ vertices and density $d$.
+* `--sqnc <s> <t>`: Generate a 2-dimensional grids with wrap-around game with $s$ size and 5 types $t$ of transformations.
 
-- CaDiCaL: https://github.com/arminbiere/cadical  
-- Kissat: https://github.com/arminbiere/kissat  
-- ZChaff: https://www.princeton.edu/~chaff/zchaff.html  
-- PySAT: https://pysathq.github.io/  
-- Z3: https://www.microsoft.com/en-us/research/project/z3-3/  
-- OR-Tools: https://github.com/google/or-tools  
+The benchmark generators included in this tool are based on established research in parity games and graph theory:
 
-Example usage:
-    ```bash
-    cadical game.cnf
-    kissat game.cnf
-    zchaff game.cnf
-    ```  
+*   **Jurdzinski, Random, and Modelchecker Ladder:** These are implemented based on the **PGSolver** collection.
+    *   *Reference:* Friedmann, O., & Lange, M. (2010). The PGSolver Collection of Parity Game Solvers. *Technical Report*, University of Munich.
+*   **Sprang and Sqnc:** These generators are adapted from the experimental evaluation of shortest-path algorithms.
+    *   *Reference:* Cherkassky, B. V., Goldberg, A. V., & Radzik, T. (1996). Shortest paths algorithms: Theory and experimental evaluation. *Mathematical Programming*, 73(2), 129–174.
 
-## MiniZinc Support
+### Global settings
 
-Install MiniZinc and its Python bindings:
+**Parity condition reward:**
+* `--max`: (Default). Winner is determined by the parity of the highest priority occurring infinitely often.
+* `--min`: Winner is determined by the parity of the lowest priority occurring infinitely often.
+<!-- * `--flip`: Priority Inversion. Maps each priority $p$ to $p+1$, effectively swapping the winning regions for Player 0 and Player 1. -->
+**Additional info:**
+* `--weights <w1> <w2>`: Define the range for edge weights from $w_1$ to $w_2$.
 
-- https://www.minizinc.org/  
-- https://python.minizinc.dev/en/latest/
+### Methods & Solving Engines
 
-To enable custom FlatZinc backend support:
+**Solvers:**
+* `--noc-even` / `--noc-odd`: Solve for a specific player (EVEN or ODD) using the NOC approach.
+* `--chuffed-bool`: Use the Chuffed CP solver using BoolVars (default).
+* `--chuffed-int`: Use the Chuffed CP solver using IntVars.
+* `--gecode`: Use the Gecode CP solver (if enabled).
+* `--gecode`: Use the Cadical SAT solver (if enabled).
+* `--branch-reach`: Use Reachability heuristic (combined with Chuffed).
 
-1. From the chuffed-patch folder:
+**Winning Conditions:**
+* `--parity`: Parity condition (default).
+* `--energy <*threshold>`: Energy condition with optional <*> threshold by default 0.
+* `--mean-payoff <*threshold>`: Mean-Payoff condition with optional <*> threshold by default 0.0.
 
-    - Copy `game.h` and `noc.h` into `chuffed/support`
-    - Apply `flatzinc-NOC.patch` to the Chuffed repository
+**Other algorithms:**
 
-2. Rebuild Chuffed:
-    ```bash
-    cmake -B build -S . -DCMAKE_INSTALL_PREFIX=/home/<user>/.local
-    cmake --build build --target install
-    ```  
+* `--fra`: algorithmse using the Fordward Recursive Algorithm.
+* `--zra`: Solve using Zielonka's Recursive Algorithm.
+* `--scc`: Decompose the game graph into Strongly Connected Components (SCCs) to optimize solving.
 
-3. Use chuffed-noc.msc as the solver configuration in MiniZinc
+### Output & Export
 
-    Modify `chuffed-noc.msc` with the correct path as appropriate
+**Formatting:**
+* `--verbose`: Print full execution details and progress.
+* `--print-game`: Print the game graph structure.
+* `--print-solution`: Print the winning regions and strategies for all vertices.
+* `--print-statistics`: Print performance metrics after solving.
 
-4. Example:
-    ```bash
-    minizinc model/cp-based-extended.mzn data/jurd-2-1.dzn --solver chuffed-patch/chuffed-noc.msc
-    ```  
+**Timing:**
+* `--print-time`: Print result and the solving time.
+* `--print-times`: Print result and all other timing data.
+* `--print-only-time`: Print the solving time (no result).
+* `--print-only-times`: Print all timing data (no result).
 
-5. See more examples in the model/ and mzn-python/ folders
+**Exporting:**
+* `--export-dzn <filename>`: Save the current game in DZN format.
+* `--export-gm <filename>`: Save the current game in GM format.
+* `--export-gmw <filename>`: Save the game in GM format, including weight data.
+* `--export-chpka <filename>`: Save the game in Energy format (Chaolupka).
+* `--sat-encoding <filename>`: Encode the game into DIMACS format and save it to a file.
 
-## Notes
+## Example
 
-- The reduction-sat.mzn model is designed only from the EVEN player's perspective.
-- MiniZinc solvers (drivers):
+```bash
+./nocq --rand 20 10 1 3 --weights -10 10 --noc --parity --mean-payoff --init 10
+```
 
-    - 0 = Gecode
-    - 1 = Chuffed
-    - 2 = cpsattlp
-    - 3 = chuffed-noc (custom patched)
+This execution generates a random game consisting of $n=20$ vertices with a maximum priority of $p=10$ and an out-degree for each vertex ranging between 1 and 3. It assigns random edge weights within the interval $[-10, 10]$ and utilizes the NOC (No-Opponent-Cycle) propagator to solve the game under both Parity and Mean-Payoff conditions simultaneously. The solver specifically computes the winning regions and strategies starting from the designated initial vertex 10.
 
-To use driver 3, ensure chuffed-noc.msc is configured (typically in ~/.minizinc/solvers).
+## Parallel Solving
+
+To exploit the problem duality of parity games, we provide a utility script that initiates parallel solving processes. The script runs the problem from the perspectives of both players simultaneously, terminating as soon as the first process finds a winning region.
+
+From your build directory, you can run the parallel script on a generated random game:  
+
+```bash
+sh ../resources/nocq-parallel.sh --jurd 100 10 --noc --print-times
+```
+
+<!-- ## Tool Demonstration (NOCQ integration with external Graphing)
+
+Integration with [Graphing](https://github.com/GonzaloHernandez/graphing) for visualization:
+
+[![NOCQ Demo](resources/NOCQ_Graphing.png)](https://www.youtube.com/watch?v=7A_czF_oWW8)
+
+*Click the image above to watch the demonstration.* -->

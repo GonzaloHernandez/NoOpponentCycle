@@ -1,0 +1,928 @@
+/*
+ * Main authors:
+ *    Gonzalo Hernandez <gonzalo.hernandez@monash>
+ *    <gonzalo.hernandez@udenar.edu.co>
+ *
+ * Contributing authors:
+ *    Guido Tack <guido.tack@monash.edu>
+ *    Julian Gutierrez <J.Gutierrez@sussex.ac.uk>
+ *
+ * This file is part of NOCQ (a CP Toolchain for parity games with quantitative
+ * conditions).
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public License,
+ * v. 2.0. If a copy of the MPL was not distributed with this file, You can get
+ * one at https://mozilla.org/MPL/2.0/.
+ *
+ *-----------------------------------------------------------------------------
+ */
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <fstream>
+
+#include "cp_nocq/nocq_chuffed_bool.cpp"
+#include "cp_nocq/nocq_chuffed_int.cpp"
+#include "utils/dbg.h"
+#include "utils/fra.h"
+#include "utils/game.h"
+#include "utils/satencoder.h"
+#include "utils/tarjan.h"
+#include "utils/zielonka.h"
+
+#ifdef HAS_GECODE
+#include "cp_nocq/nocq_gecode.cpp"
+#endif
+
+#ifdef HAS_CADICAL
+#include "cp_nocq/nocq_cadical.cpp"
+#endif
+
+#ifdef HAS_ORTOOLS
+#include "cp_nocq/nocq_ortools_int.cpp"
+#include "cp_nocq/nocq_ortools_bool.cpp"
+#endif
+
+
+//=============================================================================
+
+struct Version {
+    int16_t major, minor, patch;
+};
+constexpr Version NOCQ_VERSION{1, 1, 1};
+
+#include "utils/parameters.h"
+
+//=============================================================================
+
+int main(int argc, char* argv[]) {
+    launchdbg();
+    so.nof_solutions = 1;
+    parseMyOptions(argc, argv);
+
+    Game* game = nullptr;
+
+    //-------------------------------------------------------------------------
+    // Default options
+
+    if (options.method == "" && options.solver != "") {
+        options.method = "noc-even";
+    }
+    if (options.method.substr(0, 3) == "noc" && options.solver == "") {
+        options.solver = "chuffed-bool";
+    }
+    if (options.parityCond) {
+        if (options.method == "") options.method = "noc-even";
+        if (options.solver == "") options.solver = "chuffed-bool";
+        if (!options.propChecker) options.propEager = true;
+    }
+    if (!(options.parityCond)) {
+        options.parityCond = true;
+    }
+    //-------------------------------------------------------------------------
+
+    std::chrono::high_resolution_clock::time_point clockStorage;
+
+    auto startClock = [&]() { clockStorage = std::chrono::high_resolution_clock::now(); };
+
+    auto stopClock = [&]() -> double {
+        auto endTime = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration<double>(endTime - clockStorage).count();
+    };
+
+    //-------------------------------------------------------------------------
+
+    startClock();  //.............................................
+    switch (options.gameType) {
+        case DZN:
+        case GM:
+        case HOA:
+            try {
+                game = new Game(options.gameType, options.gameFilename, options.init[0], options.objective);
+            } catch (const std::invalid_argument& e) {
+                std::cout << "Error: Could not parse '" << options.gameFilename << "'." << std::endl;
+                exit(0);
+            }
+            break;
+        case JURD:
+        case RAND:
+        case MLADDER:
+        case SPRAND:
+        case SQNC:
+            game = new Game(options.gameType, options.vals, options.init[0], options.objective);
+            break;
+        default:
+            return 0;
+    }
+    double launchinggame = stopClock();  //...........................
+
+    if (options.printGame) {
+        game->printGame();
+        std::cout << "----------\n";
+    }
+
+    if (options.printVerbose) {
+        std::cout << "Method             : " << options.method << "\n";
+        std::cout << "Algorithm          : " << options.solver << "\n";
+        std::cout << "Objective          : " << (options.objective ? "Maximize" : "Minimize") << " reward\n";
+        std::cout << "Propagators        : " << (options.propEager ? "+Eager " : "")
+                  << (options.propMemo ? "+Memo " : "") << (options.propChecker ? "+Checker " : "") << "\n";
+        std::cout << "Initial vertex     : ";
+        for (size_t i = 0; i < options.init.size(); i++) {
+            std::cout << options.init[i] << " ";
+        }
+        std::cout << "\n";
+    }
+
+    if (options.flip) game->flipGame();
+
+    if ((options.printTime > 1 || options.printVerbose)) {
+        std::cout << "Game creation time : " << launchinggame << std::endl;
+    } else if (options.printTime < -1) {
+        std::cout << launchinggame << " " << std::flush;
+    }
+
+    if (options.exportType != DEF) {
+        game->exportFile(options.exportType, options.exportFilename);
+    }
+
+    if (options.printVerbose) std::cout << "Winning Conditions : ";
+
+    //-------------------------------------------------------------------------
+
+    vec<WinningCondition*> qlWinConditions;
+    if (options.parityCond) {
+        ParityCondition* c = new ParityCondition(*game, options.method == "noc-even" ? EVEN : ODD);
+        if (options.printVerbose) std::cout << "+parity ";
+        qlWinConditions.push(c);
+    }
+
+    if (options.printVerbose) std::cout << "\n";
+
+    //-------------------------------------------------------------------------
+    // For testing purposes
+
+    if (options.method == "testing") {
+    }
+
+    //-------------------------------------------------------------------------
+    // NOC-Chuffed-Bool
+
+    else if (options.method.substr(0, 3) == "noc" && options.solver == "chuffed-bool") {
+        startClock();  //.............................................
+        ChuffedBool::NOCModel* model = nullptr;
+        bool top_level_fail = false;
+        std::string top_level_fail_msg = "";
+
+        int old_stdout = dup(1);
+        int temp_fd = open("temp_stdout.log", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+        if (temp_fd != -1) {
+            dup2(temp_fd, 1);
+            close(temp_fd);
+        }
+
+        try {
+            model = new ChuffedBool::NOCModel(*game, qlWinConditions,
+                                              options.printSolution,
+                                              options.method == "noc-even" ? EVEN : ODD, options.brancher,
+                                              options.propEager, options.propMemo, options.propChecker);
+        } catch (const std::runtime_error& e) {
+            if (std::string(e.what()) == "CHUFFED_TOP_LEVEL_FAILURE") {
+                top_level_fail = true;
+            } else {
+                if (old_stdout != -1) {
+                    fflush(stdout);
+                    dup2(old_stdout, 1);
+                    close(old_stdout);
+                }
+                unlink("temp_stdout.log");
+                throw;
+            }
+        }
+        if (old_stdout != -1) {
+            fflush(stdout);
+            dup2(old_stdout, 1);
+            close(old_stdout);
+        }
+
+        std::ifstream temp_file("temp_stdout.log");
+        if (temp_file.is_open()) {
+            std::stringstream buffer;
+            buffer << temp_file.rdbuf();
+            top_level_fail_msg = buffer.str();
+            temp_file.close();
+        }
+        unlink("temp_stdout.log");
+
+        so.print_sol = options.printSolution;
+        double preptime = stopClock();  //............................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        std::streambuf* old_buf = std::cout.rdbuf();
+        std::stringstream ss;
+        std::cout.rdbuf(ss.rdbuf());
+
+        startClock();  //.............................................
+        if (!top_level_fail && model != nullptr) {
+            engine.solve(model);
+        }
+        double totaltime = stopClock();  //...........................
+
+        std::cout.rdbuf(old_buf);
+
+        std::string answer = "";
+        if ((options.method == "noc-even" && !top_level_fail && engine.solutions) ||
+            (options.method != "noc-even" && (!engine.solutions || top_level_fail))) {
+            answer = "EVEN";
+        } else {
+            answer = "ODD";
+        }
+
+        std::string answerSAT = "";
+        if (!top_level_fail && engine.solutions) {
+            answerSAT = "(SAT)";
+        } else {
+            answerSAT = "(UNSAT)";
+        }
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Solving time       : " << totaltime << std::endl;
+            // std::cout << "Mem used           : " << memUsed() << std::endl;
+        } else if (options.printTime < 0) {
+            if (options.totalTime)
+                std::cout << preptime + totaltime << " " << std::flush;
+            else
+                std::cout << totaltime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << totaltime << " " << std::flush;
+        } else if (options.printTime == 2 || options.printVerbose) {
+            std::cout << "Result             : ";
+        }
+
+        if (options.printTime >= 0 || options.printVerbose) {
+            std::cout << answer;
+            if (options.printSAT || options.printVerbose) {
+                std::cout << " " << answerSAT;
+            }
+        }
+
+        if (options.printSolution) {
+            std::cout << "\n----------\n";
+            if (top_level_fail) {
+                std::cout << "\n" << top_level_fail_msg;
+            } else {
+                std::cout << "\n" << ss.str();
+            }
+        }
+
+        std::cout << std::endl;
+
+        if (options.printStatistics || options.printVerbose) {
+            engine.printStats();
+        }
+
+        delete model;
+    }
+
+    //-------------------------------------------------------------------------
+    // NOC-Chuffed-Int
+
+    else if (options.method.substr(0, 3) == "noc" && options.solver == "chuffed-int") {
+        startClock();  //.............................................
+        ChuffedInt::NOCModel* model =
+            new ChuffedInt::NOCModel(*game, qlWinConditions, 
+                                     options.printSolution,
+                                     options.method == "noc-even" ? EVEN : ODD, options.brancher);
+
+        so.print_sol = options.printSolution;
+        double preptime = stopClock();  //............................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        std::streambuf* old_buf = std::cout.rdbuf();
+        std::stringstream ss;
+        std::cout.rdbuf(ss.rdbuf());
+
+        startClock();  //.............................................
+        engine.solve(model);
+        double totaltime = stopClock();  //...........................
+
+        std::cout.rdbuf(old_buf);
+
+        std::string answer = "";
+        if ((options.method == "noc-even" && engine.solutions) || (options.method != "noc-even" && !engine.solutions)) {
+            answer = "EVEN";
+        } else {
+            answer = "ODD";
+        }
+
+        std::string answerSAT = "";
+        if (engine.solutions) {
+            answerSAT = "(SAT)";
+        } else {
+            answerSAT = "(UNSAT)";
+        }
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Solving time       : " << totaltime << std::endl;
+            // std::cout << "Mem used           : " << memUsed() << std::endl;
+        } else if (options.printTime < 0) {
+            std::cout << totaltime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << totaltime << " " << std::flush;
+        } else if (options.printTime == 2 || options.printVerbose) {
+            std::cout << "Result             : ";
+        }
+
+        if (options.printTime >= 0 || options.printVerbose) {
+            std::cout << answer;
+            if (options.printSAT || options.printVerbose) {
+                std::cout << " " << answerSAT;
+            }
+        }
+
+        if (options.printSolution) {
+            std::cout << "\n----------\n";
+            std::cout << "\n" << ss.str();
+        }
+
+        std::cout << std::endl;
+
+        if (options.printStatistics || options.printVerbose) {
+            engine.printStats();
+        }
+
+        delete model;
+    }
+
+    //-------------------------------------------------------------------------
+    // NOC-Gecode
+
+    else if (options.method.substr(0, 3) == "noc" && options.solver == "gecode") {
+#ifdef HAS_GECODE
+        startClock();  //.............................................
+        Gecode::NocModel* model =
+            new Gecode::NocModel(*game, qlWinConditions, options.method == "noc-even" ? EVEN : ODD);
+
+        double preptime = stopClock();  //............................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        startClock();  //.............................................
+        Gecode::DFS<Gecode::NocModel> dfs(model);
+        delete model;
+        Gecode::NocModel* solution = dfs.next();
+        double totaltime = stopClock();  //...........................
+
+        std::string answer = "";
+        if ((options.method == "noc-even" && solution) || (options.method != "noc-even" && !solution)) {
+            answer = "EVEN";
+        } else {
+            answer = "ODD";
+        }
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Solving time       : " << totaltime << std::endl;
+            // std::cout << "Mem used           : " << "???" << std::endl;
+        }
+        if (options.printTime < 0) {
+            std::cout << totaltime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << totaltime << " " << std::flush;
+        } else if (options.printTime == 2 || options.printVerbose) {
+            std::cout << "Result             : ";
+        }
+
+        if (options.printTime >= 0 || options.printVerbose) {
+            std::cout << answer;
+        }
+
+        if (options.printSolution) {
+            std::cout << "\n----------\n";
+            if (solution)
+                solution->print();
+            else
+                std::cout << "UNSATISFIABLE" << std::endl;
+        }
+
+        std::cout << std::endl;
+
+        if (options.printStatistics || options.printVerbose) {
+            std::cout << "Statistics";
+        }
+
+        if (solution) delete solution;
+
+#else
+        std::cout << "Error: Gecode support is disabled. "
+                  << "Please rebuild NOCQ using -DENABLE_GECODE=ON\n";
+
+#endif  // HAS_GECODE
+
+    }
+
+    //-------------------------------------------------------------------------
+    // NOC-CaDiCaL
+
+    else if (options.method.substr(0, 3) == "noc" && options.solver == "cadical") {
+#ifdef HAS_CADICAL
+        startClock();  //.............................................
+        CaDiCaL::NOCModel* model =
+            new CaDiCaL::NOCModel(*game, winConditions, options.method == "noc-even" ? EVEN : ODD);
+
+        double preptime = stopClock();  //............................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        startClock();  //.............................................
+        bool solution = model->solve();
+        double totaltime = stopClock();  //...........................
+
+        std::string answer = "";
+        if ((options.method == "noc-even" && solution) || (options.method != "noc-even" && !solution)) {
+            answer = "EVEN";
+        } else {
+            answer = "ODD";
+        }
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Solving time       : " << totaltime << std::endl;
+            // std::cout << "Mem used           : " << "???" << std::endl;
+        }
+        if (options.printTime < 0) {
+            std::cout << totaltime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << totaltime << " " << std::flush;
+        } else if (options.printTime == 2 || options.printVerbose) {
+            std::cout << "Result             : ";
+        }
+
+        if (options.printTime >= 0 || options.printVerbose) {
+            std::cout << answer;
+        }
+
+        if (options.printSolution) {
+            std::cout << "\n----------\n";
+            if (solution)
+                model->print();
+            else
+                std::cout << "UNSATISFIABLE" << std::endl;
+        }
+
+        std::cout << std::endl;
+
+        if (options.printStatistics || options.printVerbose) {
+            model->statistics();
+        }
+
+#else
+        std::cout << "Error: CaDiCaL support is disabled. "
+                  << "Please rebuild NOCQ using -DENABLE_CADICAL=ON\n";
+
+#endif  // HAS_CADICAL
+
+    }
+
+
+//-------------------------------------------------------------------------
+    // NOC-ORTools-Int
+
+    else if (options.method.substr(0, 3) == "noc" && (options.solver == "ortools-int" || options.solver == "ortools")) {
+#ifdef HAS_ORTOOLS
+        startClock();  //.............................................
+        ORToolsInt::NOCModel* model =
+            new ORToolsInt::NOCModel(*game, qlWinConditions, 
+                                     options.printSolution,
+                                     options.method == "noc-even" ? EVEN : ODD, options.brancher);
+
+        double preptime = stopClock();  //............................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        std::streambuf* old_buf = std::cout.rdbuf();
+        std::stringstream ss;
+        std::cout.rdbuf(ss.rdbuf());
+
+        startClock();  //.............................................
+        bool solutions = model->solve();
+        double totaltime = stopClock();  //...........................
+
+        std::cout.rdbuf(old_buf);
+
+        std::string answer = "";
+        if ((options.method == "noc-even" && solutions) || (options.method != "noc-even" && !solutions)) {
+            answer = "EVEN";
+        } else {
+            answer = "ODD";
+        }
+
+        std::string answerSAT = "";
+        if (solutions) {
+            answerSAT = "(SAT)";
+        } else {
+            answerSAT = "(UNSAT)";
+        }
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Solving time       : " << totaltime << std::endl;
+            // std::cout << "Mem used           : " << memUsed() << std::endl;
+        } else if (options.printTime < 0) {
+            std::cout << totaltime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << totaltime << " " << std::flush;
+        } else if (options.printTime == 2 || options.printVerbose) {
+            std::cout << "Result             : ";
+        }
+
+        if (options.printTime >= 0 || options.printVerbose) {
+            std::cout << answer;
+            if (options.printSAT || options.printVerbose) {
+                std::cout << " " << answerSAT;
+            }
+        }
+
+        if (options.printSolution) {
+            std::cout << "\n----------\n";
+            std::cout << "\n" << ss.str();
+        }
+
+        std::cout << std::endl;
+
+        delete model;
+
+#else
+        std::cout << "Error: OR-Tools support is disabled. "
+                  << "Please rebuild NOCQ using -DENABLE_ORTOOLS=ON\n";
+#endif  // HAS_ORTOOLS
+    }
+
+    //-------------------------------------------------------------------------
+    // NOC-ORTools-Bool
+
+    else if (options.method.substr(0, 3) == "noc" && options.solver == "ortools-bool") {
+#ifdef HAS_ORTOOLS
+        startClock();  //.............................................
+        ORToolsBool::NOCModel* model =
+            new ORToolsBool::NOCModel(*game, qlWinConditions, 
+                                      options.printSolution,
+                                      options.method == "noc-even" ? EVEN : ODD, options.brancher,
+                                      options.propEager, options.propMemo, options.propChecker);
+
+        double preptime = stopClock();  //............................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        std::streambuf* old_buf = std::cout.rdbuf();
+        std::stringstream ss;
+        std::cout.rdbuf(ss.rdbuf());
+
+        startClock();  //.............................................
+        bool solutions = model->solve();
+        double totaltime = stopClock();  //...........................
+
+        std::cout.rdbuf(old_buf);
+
+        std::string answer = "";
+        if ((options.method == "noc-even" && solutions) || (options.method != "noc-even" && !solutions)) {
+            answer = "EVEN";
+        } else {
+            answer = "ODD";
+        }
+
+        std::string answerSAT = "";
+        if (solutions) {
+            answerSAT = "(SAT)";
+        } else {
+            answerSAT = "(UNSAT)";
+        }
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Solving time       : " << totaltime << std::endl;
+            // std::cout << "Mem used           : " << memUsed() << std::endl;
+        } else if (options.printTime < 0) {
+            std::cout << totaltime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << totaltime << " " << std::flush;
+        } else if (options.printTime == 2 || options.printVerbose) {
+            std::cout << "Result             : ";
+        }
+
+        if (options.printTime >= 0 || options.printVerbose) {
+            std::cout << answer;
+            if (options.printSAT || options.printVerbose) {
+                std::cout << " " << answerSAT;
+            }
+        }
+
+        if (options.printSolution) {
+            std::cout << "\n----------\n";
+            std::cout << "\n" << ss.str();
+        }
+
+        std::cout << std::endl;
+
+        delete model;
+
+#else
+        std::cout << "Error: OR-Tools support is disabled. "
+                  << "Please rebuild NOCQ using -DENABLE_ORTOOLS=ON\n";
+#endif  // HAS_ORTOOLS
+    }
+
+    //-------------------------------------------------------------------------
+    // NOC-ORTools-Int
+
+    else if (options.method.substr(0, 3) == "noc" && options.solver == "ortools-int") {
+#ifdef HAS_ORTOOLS
+        startClock();  //.............................................
+        ORToolsInt::NOCModel* model =
+            new ORToolsInt::NOCModel(*game, qlWinConditions, 
+                                     options.printSolution,
+                                     options.method == "noc-even" ? EVEN : ODD, options.brancher);
+
+        double preptime = stopClock();  //............................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        std::streambuf* old_buf = std::cout.rdbuf();
+        std::stringstream ss;
+        std::cout.rdbuf(ss.rdbuf());
+
+        startClock();  //.............................................
+        bool solutions = model->solve();
+        double totaltime = stopClock();  //...........................
+
+        std::cout.rdbuf(old_buf);
+
+        std::string answer = "";
+        if ((options.method == "noc-even" && solutions) || (options.method != "noc-even" && !solutions)) {
+            answer = "EVEN";
+        } else {
+            answer = "ODD";
+        }
+
+        std::string answerSAT = "";
+        if (solutions) {
+            answerSAT = "(SAT)";
+        } else {
+            answerSAT = "(UNSAT)";
+        }
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Solving time       : " << totaltime << std::endl;
+            // std::cout << "Mem used           : " << memUsed() << std::endl;
+        } else if (options.printTime < 0) {
+            std::cout << totaltime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << totaltime << " " << std::flush;
+        } else if (options.printTime == 2 || options.printVerbose) {
+            std::cout << "Result             : ";
+        }
+
+        if (options.printTime >= 0 || options.printVerbose) {
+            std::cout << answer;
+            if (options.printSAT || options.printVerbose) {
+                std::cout << " " << answerSAT;
+            }
+        }
+
+        if (options.printSolution) {
+            std::cout << "\n----------\n";
+            std::cout << "\n" << ss.str();
+        }
+
+        std::cout << std::endl;
+
+        delete model;
+
+#else
+        std::cout << "Error: OR-Tools support is disabled. "
+                  << "Please rebuild NOCQ using -DENABLE_ORTOOLS=ON\n";
+#endif  // HAS_ORTOOLS
+    }
+
+    //-------------------------------------------------------------------------
+    // SAT Encoding
+
+    else if (options.method == "sat") {
+        SATEncoder encoder(*game);
+
+        startClock();  //.............................................
+        auto cnf = encoder.getCNF();
+        double encodetime = stopClock();  //..........................
+
+        startClock();  //.............................................
+        encoder.dimacs(cnf, options.exportFilename);
+        double dimacstime = stopClock();  //..........................
+
+        std::string answer = "DONE";
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Encoding time      : " << encodetime << std::endl;
+        } else if (options.printTime < 0) {
+            std::cout << encodetime << " " << std::flush;
+        }
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Saving DIMACS time : " << dimacstime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << dimacstime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << encodetime << " " << std::flush;
+        } else if (options.printTime == 2 || options.printVerbose) {
+            std::cout << "Result             : ";
+        }
+
+        if (options.printTime >= 0 || options.printVerbose) {
+            std::cout << answer;
+        }
+
+        std::cout << std::endl;
+    }
+
+    //-------------------------------------------------------------------------
+    // ZRA
+
+    else if (options.method == "zra") {
+        startClock();  //.............................................
+        Zielonka zlk(*game);
+        double preptime = stopClock();  //............................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        startClock();  //.............................................
+        auto win = zlk.solve();
+        double totaltime = stopClock();  //...........................
+
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Solving time       : " << totaltime << std::endl;
+        } else if (options.printTime < 0) {
+            std::cout << totaltime << " " << std::flush;
+        }
+
+        if (options.printTime == 1) {
+            std::cout << totaltime << " " << std::flush;
+        }
+
+        for (size_t i = 0; i < options.init.size(); i++) {
+            int32_t v0 = options.init[i];
+            auto it = std::find(win[0].begin(), win[0].end(), v0);
+
+            if (options.printTime >= 0 || options.printVerbose)
+                std::cout
+                    // << v0 << ": "
+                    << (it != win[0].end() ? "EVEN " : "ODD ");
+
+            std::cout << std::endl;
+        }
+
+        if (options.printSolution) {
+            std::cout << "EVEN {";
+            for (int i = 0; i < win[0].size(); i++) {
+                std::cout << win[0][i];
+                if (i < win[0].size() - 1) std::cout << ",";
+            }
+            std::cout << "}\nODD  {";
+            for (int i = 0; i < win[1].size(); i++) {
+                std::cout << win[1][i];
+                if (i < win[1].size() - 1) std::cout << ",";
+            }
+            std::cout << "}" << std::endl;
+        }
+
+    }
+
+    //-------------------------------------------------------------------------
+    // FRA
+
+    else if (options.method == "fra") {
+        if (options.printSolution) {
+            options.init.growTo(game->nvertices);
+            for (int32_t v = 0; v < game->nvertices; v++) options.init[v] = v;
+        }
+
+        double preptime = 0;
+        if (options.printTime > 1 || options.printVerbose) {
+            std::cout << "Init time          : " << preptime << std::endl;
+        } else if (options.printTime < -1) {
+            std::cout << preptime << " " << std::flush;
+        }
+
+        for (size_t i = 0; i < options.init.size(); i++) {
+            int32_t v = options.init[i];
+
+            startClock();  //.............................................
+            auto play = getPlay(*game, v, true);
+            double totaltime = stopClock();  //...........................
+
+            std::string answer;
+            if (play == EVEN) {
+                answer = "EVEN";
+            } else {
+                answer = "ODD";
+            }
+
+            if (options.printTime > 1 || options.printVerbose) {
+                std::cout << "Solving time       : " << totaltime << std::endl;
+            } else if (options.printTime < 0) {
+                std::cout << totaltime << " " << std::flush;
+            }
+
+            if (options.printTime == 1) {
+                std::cout << totaltime << " " << std::flush;
+            } else if (options.printTime == 2 || options.printVerbose) {
+                std::cout << "Result             : ";
+            }
+
+            if (options.printTime >= 0 || options.printVerbose) {
+                std::cout << answer;
+            }
+
+            std::cout << std::endl;
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    // SCC
+
+    else if (options.method == "scc") {
+        GameView view(*game);
+        TarjanSCC tscc(*game, view);
+
+        vec<vec<int32_t>*> sccs;  // Adjusted to int32_t
+        tscc.solve(sccs);
+
+        int counter = 0;
+        for (unsigned int i = 0; i < sccs.size(); i++) {
+            vec<int32_t>& scc = *(sccs[i]);  // Adjusted to int32_t
+
+            std::cout << "{";
+            for (unsigned int j = 0; j < scc.size(); j++) {
+                std::cout << scc[j];
+                if (j < scc.size() - 1) std::cout << ",";
+            }
+            std::cout << "}" << std::endl;
+            counter += 1;
+        }
+        std::cout << "Total SCCs: " << counter << std::endl;
+
+        for (unsigned int i = 0; i < sccs.size(); i++) {
+            delete sccs[i];
+        }
+    }
+
+    //-------------------------------------------------------------------------
+
+    delete game;
+
+    return 0;
+}

@@ -1,0 +1,116 @@
+/*
+ * Main authors:
+ *    Gonzalo Hernandez <gonzalo.hernandez@monash>
+ *    <gonzalo.hernandez@udenar.edu.co>
+ *
+ * Contributing authors:
+ *    Guido Tack <guido.tack@monash.edu>
+ *    Julian Gutierrez <J.Gutierrez@sussex.ac.uk>
+ *
+ * This file is part of NOCQ (a CP Toolchain for parity games with quantitative
+ * conditions).
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public License,
+ * v. 2.0. If a copy of the MPL was not distributed with this file, You can get
+ * one at https://mozilla.org/MPL/2.0/.
+ * 
+ *-----------------------------------------------------------------------------
+ */
+#ifndef GAME_H
+#define GAME_H
+
+#include <iostream>
+#include <fstream>
+#include <regex>
+#include <sstream>
+#include <cassert>
+#include <algorithm>
+#include <random>
+#include <chrono> 
+#include <climits>
+
+#ifndef vec_h
+#include "chuffed/support/vec.h"
+#endif
+
+enum parity_type    {EVEN,ODD};                             // 0,1
+enum objective_type {MIN,MAX};                              // 0,1
+enum game_type      {DEF,JURD,RAND,MLADDER,SPRAND,SQNC,     // Game structure
+                    DZN,GM,GMW,CHPKA,DIM,HOA};              // Game file format
+enum parity_comp    {BET,EQU,BEQ};
+
+//-----------------------------------------------------------------------------
+
+parity_type opponent(parity_type PARITY);
+
+//=============================================================================
+
+class Game {
+public:
+    friend class SATEncoder;
+    friend class CPModel;
+    friend int main(int, char*[]);
+public:
+    vec<int8_t>         owners;
+    vec<int64_t>        priors;
+    vec<int32_t>        sources;
+    vec<int32_t>        targets;
+
+    vec<vec<int32_t>>   outs;
+    vec<vec<int32_t>>   ins;
+    int32_t             nvertices;
+    int32_t             nedges;
+    int32_t             init;
+    objective_type      objective;
+
+public:
+    
+    Game(   vec<int8_t>&    owners,
+            vec<int64_t>&   priors,
+            vec<int32_t>&   sources,
+            vec<int32_t>&   targets,
+            int32_t         init = 0, 
+            objective_type  obj = MAX);
+
+    Game(   game_type       type, 
+            std::string     filename,
+            int32_t         init = 0, 
+            objective_type  obj = MAX);
+
+    Game(   game_type       type,
+            vec<int32_t>&   vals,
+            int32_t         init = 0,
+            objective_type  obj = MAX);
+
+    void setInit            (int32_t init);
+    void setObjectiveType   (objective_type obj);
+    bool isBetter           (int64_t p1, int64_t p2);
+    void exportFile         (game_type type, std::string filename);
+    void printGame();
+    void flipGame();
+};
+
+// ============================================================================
+
+class GameView {
+private:
+    Game& g;
+public:
+    vec<bool> vs;
+    vec<bool> es;
+    GameView(Game& g);
+
+    //-------------------------------------------------------------------------
+
+    // Return active elements
+    void getVertices(vec<int32_t>& vs);
+    void getEdges   (vec<int32_t>& es);
+    void getOuts    (vec<int32_t>& es, int32_t v);
+    void getIns     (vec<int32_t>& es, int32_t w);
+    std::string viewCurrent();
+
+    void activeAll();
+    void deactiveAll();
+};
+
+#endif // GAME_H
