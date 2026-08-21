@@ -447,7 +447,7 @@ int main(int argc, char* argv[]) {
 #ifdef HAS_CADICAL
         startClock();  //.............................................
         CaDiCaL::NOCModel* model =
-            new CaDiCaL::NOCModel(*game, winConditions, options.method == "noc-even" ? EVEN : ODD);
+            new CaDiCaL::NOCModel(*game, qlWinConditions, options.method == "noc-even" ? EVEN : ODD);
 
         double preptime = stopClock();  //............................
 
@@ -468,6 +468,13 @@ int main(int argc, char* argv[]) {
             answer = "ODD";
         }
 
+        std::string answerSAT = "";
+        if (solution) {
+            answerSAT = "(SAT)";
+        } else {
+            answerSAT = "(UNSAT)";
+        }
+        
         if (options.printTime > 1 || options.printVerbose) {
             std::cout << "Solving time       : " << totaltime << std::endl;
             // std::cout << "Mem used           : " << "???" << std::endl;
@@ -484,6 +491,9 @@ int main(int argc, char* argv[]) {
 
         if (options.printTime >= 0 || options.printVerbose) {
             std::cout << answer;
+            if (options.printSAT || options.printVerbose) {
+                std::cout << " " << answerSAT;
+            }
         }
 
         if (options.printSolution) {

@@ -104,9 +104,8 @@ public:
 
         vec<int32_t> pathV;
         vec<int32_t> pathE;
-        vec<int64_t> pathW;
 
-        filter(pathV,pathE,pathW,g.init,-1,true);
+        filter(pathV,pathE,g.init,-1,true);
 
         if (!propQueue.empty()) {
             int lit = propQueue.front();
@@ -143,11 +142,11 @@ public:
     }
     //-------------------------------------------------------------------------
     bool satisfiedConditions(   vec<int32_t>& pathV, vec<int32_t>& pathE,
-                                vec<int64_t>& pathW, int32_t index) 
+                                int32_t index) 
     {
         if (playerSAT==EVEN) {
             for (size_t i=0; i<winConditions.size(); i++) {
-                if (!winConditions[i]->satisfy(pathV,pathE,pathW,index)) {
+                if (!winConditions[i]->satisfy(pathV,pathE,index)) {
                     return false;
                 }
             }
@@ -155,7 +154,7 @@ public:
         }
         else {
             for (size_t i=0; i<winConditions.size(); i++) {
-                if (winConditions[i]->satisfy(pathV,pathE,pathW,index)) {
+                if (winConditions[i]->satisfy(pathV,pathE,index)) {
                     return true;
                 }
             }
@@ -163,12 +162,12 @@ public:
         }
     }
     //-------------------------------------------------------------------------
-    bool filter(vec<int32_t>& pathV, vec<int32_t>& pathE, vec<int64_t>& pathW,
+    bool filter(vec<int32_t>& pathV, vec<int32_t>& pathE,
         int32_t v, int32_t lastEdge, bool definedEdge) 
     {
         int index = findVertex(v,pathV);
         if (index >= 0) {
-            if (!satisfiedConditions(pathV,pathE,pathW,index)) {
+            if (!satisfiedConditions(pathV,pathE,index)) {
                 propReasons[-E[lastEdge]].clear();
                 for (size_t i=0; i<pathV.size(); i++) {
                     propReasons[-E[lastEdge]].push( -E[pathE[i]] );
@@ -188,13 +187,8 @@ public:
                 int32_t e = g.outs[v][i];
                 if (isFalse(E[e])) continue;
                 int w = g.targets[e];
-                int64_t acum = pathW.size() ? g.weights[e]+pathW.last()
-                                            : g.weights[e];
-                
                 pathE.push(e);
-                pathW.push(acum);
-                bool confl = filter(pathV, pathE, pathW, w, e, isTrue(E[e]));
-                pathW.pop();
+                bool confl = filter(pathV, pathE, w, e, isTrue(E[e]));
                 pathE.pop();
                 if (confl) {
                     return true;
