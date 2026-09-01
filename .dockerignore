@@ -1,0 +1,9 @@
+build/
+bin/
+.git/
+.cache/
+.vscode/
+.agents/
+compile_commands.json
+*.o
+*.a

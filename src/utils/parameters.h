@@ -46,8 +46,9 @@ struct options {
     std::string     method = "";        // noc-even,noc-odd,sat
                                         // zra,fra,scc
 
-    std::string     solver = "";        // chuffed-bool/int
-                                        // gecode, cadical,
+    std::string     solver = "";        // chuffed-bool/int/hyperbool
+                                        // gecode-bool, 
+                                        // cadical-bool,
                                         // ortools-bool/int
 
     std::string     brancher    = "valmin"; // reach,rand,valmin
@@ -179,9 +180,10 @@ bool parseMyOptions(int argc, char *argv[]) {
         << "Solvers:\n"
         << "  --chuffed-bool             : Use Chuffed with BoolVars "
            "(Default)\n"
+        << "  --chuffed-hyperbool        : Use Chuffed with BoolVars (Hyper)\n"
         << "  --chuffed-int              : Use Chuffed with IntVars\n"
-        << "  --gecode                   : Use Gecode solver (BoolVars)\n"
-        << "  --cadical                  : Use Cadical solver\n"
+        << "  --gecode-bool              : Use Gecode solver with BoolVars\n"
+        << "  --cadical-bool             : Use Cadical solver with BoolVars\n"
         << "  --ortools-bool             : Use OR-Tools with BoolVars\n"
         << "  --ortools-int              : Use OR-Tools with IntVars\n"
         << "  --prop-eager               : Use the propagator Eager\n"
@@ -343,12 +345,14 @@ bool parseMyOptions(int argc, char *argv[]) {
       options.solver = "chuffed-bool";
     } else if (strcmp(argv[i], "--chuffed-bool") == 0) {
       options.solver = "chuffed-bool";
+    } else if (strcmp(argv[i], "--chuffed-hyperbool") == 0) {
+      options.solver = "chuffed-hyperbool";
     } else if (strcmp(argv[i], "--chuffed-int") == 0) {
       options.solver = "chuffed-int";
-    } else if (strcmp(argv[i], "--gecode") == 0) {
-      options.solver = "gecode";
-    } else if (strcmp(argv[i], "--cadical") == 0) {
-      options.solver = "cadical";
+    } else if (strcmp(argv[i], "--gecode-bool") == 0) {
+      options.solver = "gecode-bool";
+    } else if (strcmp(argv[i], "--cadical-bool") == 0) {
+      options.solver = "cadical-bool";
     } else if (strcmp(argv[i], "--ortools-bool") == 0) {
       options.solver = "ortools-bool";
     } else if (strcmp(argv[i], "--ortools-int") == 0) {

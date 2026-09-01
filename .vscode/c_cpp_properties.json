@@ -6,19 +6,14 @@
                 "${workspaceFolder}/src/**",
                 "${workspaceFolder}/thirdparty/chuffed",
                 "${workspaceFolder}/build/chuffed_build"
-            ],
-            "__also_includePath": [
-                "${env:HOME}/.local/include"
+                // "${env:HOME}/.local/include"
             ],
             "defines": [
+                // "HAS_GECODE",
+                // "HAS_CADICAL",
+                // "HAS_ORTOOLS"
             ],
-            "__also_Defines": [
-                "HAS_GECODE",
-                "HAS_CADICAL",
-                "HAS_ORTOOLS"
-            ],
-            "compilerPath": "/usr/bin/g++",
-            "__also_compilerPath": "${env:CXX}",
+            "compilerPath": "/usr/bin/g++", //"${env:CXX}",
             "cStandard": "c17",
             "cppStandard": "c++17",
             "intelliSenseMode": "linux-gcc-x64",

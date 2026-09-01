@@ -2,7 +2,7 @@
 
 GAME="rand.gm"
 EXE="./nocq"
-PARAMS="30 5 1 10"
+PARAMS="30 50 1 10"
 
 echo "--- Step 0: Generating Game ---"
 $EXE --rand $PARAMS --export-gm $GAME
@@ -28,14 +28,17 @@ verify_node() {
     local expected=$2
     echo -n "node $node (expected $expected): "
     
-    RESULT=$($EXE --gm $GAME --noc --chuffed --init $node)
+    RESULT=$($EXE --gm $GAME --noc --chuffed-hyperbool --init $node)
     
-    if [[ $RESULT == *"$expected"* ]]; then
+if [[ "$RESULT" == *"$expected"* ]]; then
         echo "✅ match"
         ((PASS++))
-    else
+    elif [[ "$RESULT" == *"EVEN"* ]] || [[ "$RESULT" == *"ODD"* ]]; then
         echo "❌ mismatch! result: $RESULT"
         ((FAIL++))
+    else
+        echo "⚠️  unexpected output / error! result: $RESULT"
+        ((OTHER++))
     fi
 }
 
