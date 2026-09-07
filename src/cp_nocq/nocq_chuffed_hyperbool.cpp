@@ -444,7 +444,7 @@ public:
     NOCModel(Game& g,
         vec<WinningCondition*>& qlWinConditions,
         int printtype=0, parity_type playerSAT=EVEN, std::string brancherType="valmin",
-        bool propEager=true, bool propMemo=false, bool proChecker=false) 
+        bool propEager=true, bool propMemo=false, bool propChecker=false) 
     :g(g), 
         qlWinConditions(qlWinConditions),
         printtype(printtype), 
@@ -476,12 +476,65 @@ public:
         // --------------------------------------------------------------------
         // For PLAYER vertices
         for (int32_t v=0; v<g.nvertices; v++) if (g.owners[v] == playerSAT) {
+
+            // --- At least one -----------------------------------------------
             vec<Lit> clause;
             clause.push( V[v].getLit(false) );
             for (size_t i=0; i<g.outs[v].size(); i++) {
                 clause.push(E[v][i].getLit(true));
             }
             sat.addClause(clause);
+
+            // --- At most one ------------------------------------------------
+            int32_t n = g.outs[v].size();
+            if (n == 1) continue;
+
+            vec<BoolView> s(n - 1);
+            for (size_t j = 0; j < n-1; j++) s[j] = newBoolVar();
+
+            // First literal // -E_0 \/ s_0
+            {   
+                vec<Lit> clause;
+                clause.push(E[v][0].getLit(false));
+                clause.push(s[0].getLit(true));
+                sat.addClause(clause);
+            }
+
+            // Middle literals
+            for (size_t i = 1; i < n-1; i++) {
+
+                // -s_{i-1} \/ s_i
+                {
+                    vec<Lit> clause;
+                    clause.push(s[i-1].getLit(false));
+                    clause.push(s[i].getLit(true));
+                    sat.addClause(clause);
+                }
+
+                // -E_i \/ -s_{i-1}
+                {
+                    vec<Lit> clause;
+                    clause.push(E[v][i].getLit(false));
+                    clause.push(s[i-1].getLit(false));
+                    sat.addClause(clause);
+                }
+
+                // -E_i \/ s_i
+                {
+                    vec<Lit> clause;
+                    clause.push(E[v][i].getLit(false));
+                    clause.push(s[i].getLit(true));
+                    sat.addClause(clause);
+                }
+            }
+
+            // Last literal // -E_{n-1} \/ -s_{n-2}
+            {
+                vec<Lit> clause;
+                clause.push(E[v][n-1].getLit(false));
+                clause.push(s[n-2].getLit(false));
+                sat.addClause(clause);
+            }            
         }
 
         // --------------------------------------------------------------------

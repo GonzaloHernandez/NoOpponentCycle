@@ -428,7 +428,7 @@ public:
     NOCModel(Game& g,
         vec<WinningCondition*>& qlWinConditions,
         int printtype=0, parity_type playerSAT=EVEN, std::string brancherType="valmin",
-        bool propEager=true, bool propMemo=false, bool proChecker=false) 
+        bool propEager=true, bool propMemo=false, bool propChecker=false) 
     :g(g), 
         qlWinConditions(qlWinConditions),
         printtype(printtype), 
