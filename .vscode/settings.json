@@ -103,7 +103,7 @@
     "cmake.configureArgs": [
         "-DUSE_SYSTEM_CHUFFED=ON",
         "-DENABLE_GECODE=OFF",
-        "-DENABLE_CADICAL=OFF",
+        "-DENABLE_CADICAL=ON",
         "-DENABLE_ORTOOLS=OFF"
     ],
     "editor.tabSize": 4,

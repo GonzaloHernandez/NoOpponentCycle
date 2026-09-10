@@ -10,7 +10,7 @@
             ],
             "defines": [
                 // "HAS_GECODE",
-                // "HAS_CADICAL",
+                "HAS_CADICAL",
                 // "HAS_ORTOOLS"
             ],
             "compilerPath": "/usr/bin/g++", //"${env:CXX}",

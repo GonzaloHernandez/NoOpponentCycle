@@ -28,7 +28,7 @@ verify_node() {
     local expected=$2
     echo -n "node $node (expected $expected): "
     
-    RESULT=$($EXE --gm $GAME --noc --chuffed-hyperbool --init $node --branch-reach)
+    RESULT=$($EXE --gm $GAME --noc --cadical-bool --init $node)
     
 if [[ "$RESULT" == *"$expected"* ]]; then
         echo "✅ match"

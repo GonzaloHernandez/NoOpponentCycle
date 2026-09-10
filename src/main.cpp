@@ -21,7 +21,6 @@
 
 #include <fstream>
 
-#include "cp_nocq/nocq_chuffed_hyperbool.cpp"
 #include "cp_nocq/nocq_chuffed_bool.cpp"
 #include "cp_nocq/nocq_chuffed_int.cpp"
 #include "utils/dbg.h"
@@ -36,7 +35,7 @@
 #endif
 
 #ifdef HAS_CADICAL
-#include "cp_nocq/nocq_cadical.cpp"
+#include "cp_nocq/nocq_cadical_bool.cpp"
 #endif
 
 #ifdef HAS_ORTOOLS
@@ -184,132 +183,6 @@ int main(int argc, char* argv[]) {
 
         try {
             model = new ChuffedBool::NOCModel(*game, qlWinConditions,
-                                              options.printSolution,
-                                              options.method == "noc-even" ? EVEN : ODD, options.brancher,
-                                              options.propEager, options.propMemo, options.propChecker);
-        } catch (const std::runtime_error& e) {
-            if (std::string(e.what()) == "CHUFFED_TOP_LEVEL_FAILURE") {
-                top_level_fail = true;
-            } else {
-                if (old_stdout != -1) {
-                    fflush(stdout);
-                    dup2(old_stdout, 1);
-                    close(old_stdout);
-                }
-                unlink("temp_stdout.log");
-                throw;
-            }
-        }
-        if (old_stdout != -1) {
-            fflush(stdout);
-            dup2(old_stdout, 1);
-            close(old_stdout);
-        }
-
-        std::ifstream temp_file("temp_stdout.log");
-        if (temp_file.is_open()) {
-            std::stringstream buffer;
-            buffer << temp_file.rdbuf();
-            top_level_fail_msg = buffer.str();
-            temp_file.close();
-        }
-        unlink("temp_stdout.log");
-
-        so.print_sol = options.printSolution;
-        double preptime = stopClock();  //............................
-
-        if (options.printTime > 1 || options.printVerbose) {
-            std::cout << "Init time          : " << preptime << std::endl;
-        } else if (options.printTime < -1) {
-            std::cout << preptime << " " << std::flush;
-        }
-
-        std::streambuf* old_buf = std::cout.rdbuf();
-        std::stringstream ss;
-        std::cout.rdbuf(ss.rdbuf());
-
-        startClock();  //.............................................
-        if (!top_level_fail && model != nullptr) {
-            engine.solve(model);
-        }
-        double totaltime = stopClock();  //...........................
-
-        std::cout.rdbuf(old_buf);
-
-        std::string answer = "";
-        if ((options.method == "noc-even" && !top_level_fail && engine.solutions) ||
-            (options.method != "noc-even" && (!engine.solutions || top_level_fail))) {
-            answer = "EVEN";
-        } else {
-            answer = "ODD";
-        }
-
-        std::string answerSAT = "";
-        if (!top_level_fail && engine.solutions) {
-            answerSAT = "(SAT)";
-        } else {
-            answerSAT = "(UNSAT)";
-        }
-
-        if (options.printTime > 1 || options.printVerbose) {
-            std::cout << "Solving time       : " << totaltime << std::endl;
-            // std::cout << "Mem used           : " << memUsed() << std::endl;
-        } else if (options.printTime < 0) {
-            if (options.totalTime)
-                std::cout << preptime + totaltime << " " << std::flush;
-            else
-                std::cout << totaltime << " " << std::flush;
-        }
-
-        if (options.printTime == 1) {
-            std::cout << totaltime << " " << std::flush;
-        } else if (options.printTime == 2 || options.printVerbose) {
-            std::cout << "Result             : ";
-        }
-
-        if (options.printTime >= 0 || options.printVerbose) {
-            std::cout << answer;
-            if (options.printSAT || options.printVerbose) {
-                std::cout << " " << answerSAT;
-            }
-        }
-
-        if (options.printSolution) {
-            std::cout << "\n----------\n";
-            if (top_level_fail) {
-                std::cout << "\n" << top_level_fail_msg;
-            } else {
-                std::cout << "\n" << ss.str();
-            }
-        }
-
-        std::cout << std::endl;
-
-        if (options.printStatistics || options.printVerbose) {
-            engine.printStats();
-        }
-
-        delete model;
-    }
-
-    //-------------------------------------------------------------------------
-    // NOC-Chuffed-HyperBool
-
-    else if (options.method.substr(0, 3) == "noc" && options.solver == "chuffed-hyperbool") {
-        startClock();  //.............................................
-        ChuffedHyperBool::NOCModel* model = nullptr;
-        bool top_level_fail = false;
-        std::string top_level_fail_msg = "";
-
-        int old_stdout = dup(1);
-        int temp_fd = open("temp_stdout.log", O_WRONLY | O_CREAT | O_TRUNC, 0666);
-        if (temp_fd != -1) {
-            dup2(temp_fd, 1);
-            close(temp_fd);
-        }
-
-        try {
-            model = new ChuffedHyperBool::NOCModel(*game, qlWinConditions,
                                               options.printSolution,
                                               options.method == "noc-even" ? EVEN : ODD, options.brancher,
                                               options.propEager, options.propMemo, options.propChecker);

@@ -46,7 +46,7 @@ struct options {
     std::string     method = "";        // noc-even,noc-odd,sat
                                         // zra,fra,scc
 
-    std::string     solver = "";        // chuffed-bool/int/hyperbool
+    std::string     solver = "";        // chuffed-bool/int/
                                         // gecode-bool, 
                                         // cadical-bool,
                                         // ortools-bool/int
@@ -180,7 +180,6 @@ bool parseMyOptions(int argc, char *argv[]) {
         << "Solvers:\n"
         << "  --chuffed-bool             : Use Chuffed with BoolVars "
            "(Default)\n"
-        << "  --chuffed-hyperbool        : Use Chuffed with BoolVars (Hyper)\n"
         << "  --chuffed-int              : Use Chuffed with IntVars\n"
         << "  --gecode-bool              : Use Gecode solver with BoolVars\n"
         << "  --cadical-bool             : Use Cadical solver with BoolVars\n"
@@ -345,8 +344,6 @@ bool parseMyOptions(int argc, char *argv[]) {
       options.solver = "chuffed-bool";
     } else if (strcmp(argv[i], "--chuffed-bool") == 0) {
       options.solver = "chuffed-bool";
-    } else if (strcmp(argv[i], "--chuffed-hyperbool") == 0) {
-      options.solver = "chuffed-hyperbool";
     } else if (strcmp(argv[i], "--chuffed-int") == 0) {
       options.solver = "chuffed-int";
     } else if (strcmp(argv[i], "--gecode-bool") == 0) {

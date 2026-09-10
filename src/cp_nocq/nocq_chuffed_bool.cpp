@@ -35,33 +35,31 @@ class NOCCheckerSCC : public Propagator {
 private:
     Game& g;
     vec<BoolView> V;
-    vec<BoolView> E;
     parity_type playerSAT;
     WinningCondition*  winCondition;
 
 public:
-    //-----------------------------------------------------------------------
-    NOCCheckerSCC(Game& g, vec<BoolView>& V, vec<BoolView>& E, 
+    //-------------------------------------------------------------------------
+    NOCCheckerSCC(Game& g, vec<BoolView>& V,
         parity_type playerSAT, WinningCondition* winCondition) 
-    : g(g), V(V), E(E), playerSAT(playerSAT), winCondition(winCondition)
+    : g(g), V(V), playerSAT(playerSAT), winCondition(winCondition)
     {
-        for (unsigned int i = 0; i < g.owners.size(); i++)  V[i].attach(this, 1, EVENT_F);
-        for (unsigned int i = 0; i < g.sources.size(); i++) E[i].attach(this, 1, EVENT_F);
+        for (unsigned int i = 0; i < g.nvertices; i++)  
+            V[i].attach(this, 1, EVENT_F);
     }
 
-    //-----------------------------------------------------------------------
+    //-------------------------------------------------------------------------
     bool backtrack() 
     {
         vec<Lit> lits;
         lits.push(); // First slot reserved for explanation placeholder
         for (unsigned int i = 1; i < g.nvertices; i++)   lits.push(V[i].getValLit());
-        for (unsigned int i = 0; i < g.nedges; i++)      lits.push(E[i].getValLit());
         Clause* reason = Reason_new(lits);
         V[0].setVal(!V[0].isTrue(), reason);
         return false;
     }
 
-    //-----------------------------------------------------------------------
+    //-------------------------------------------------------------------------
     bool check(GameView& view) {
         // Line 1: Tarjan(G)
         TarjanSCC tarjan(g, view);
@@ -135,7 +133,7 @@ public:
         return status;
     }
 
-    //-----------------------------------------------------------------------
+    //-------------------------------------------------------------------------
     bool propagate() override {
         GameView view(g);
         view.deactiveAll();
@@ -143,10 +141,6 @@ public:
         for (unsigned int i = 0; i < g.nvertices; i++) {
             if (!V[i].isFixed()) return true;
             if (V[i].isTrue()) view.vs[i] = true;
-        }
-        for (unsigned int i = 0; i < g.nedges; i++) {
-            if (!E[i].isFixed()) return true;
-            if (E[i].isTrue()) view.es[i] = true;
         }
 
         if (!check(view)) {
@@ -156,12 +150,12 @@ public:
         return true;
     }
 
-    //-----------------------------------------------------------------------
+    //-------------------------------------------------------------------------
     void wakeup(int i, int) override {
         pushInQueue();
     }
 
-    //-----------------------------------------------------------------------
+    //-------------------------------------------------------------------------
     void clearPropState() override {
         in_queue = false;
     }
@@ -173,7 +167,7 @@ class NOCPropagator : public Propagator {
 private:
     Game&                   g;
     vec<BoolView>           V;
-    vec<BoolView>           E;
+    vec<vec<BoolView>>      E;
     parity_type             playerSAT;
     vec<WinningCondition*>  winConditions;
     bool                    memo;
@@ -184,14 +178,20 @@ private:
 
 public:
 
-    NOCPropagator(Game& g, vec<BoolView>& V, vec<BoolView>& E, 
+    NOCPropagator(Game& g, vec<BoolView>& V, vec<vec<BoolView>>& E,
         parity_type playerSAT, vec<WinningCondition*> winConditions,
         bool memo=false)
     : g(g), V(V), E(E), playerSAT(playerSAT), winConditions(winConditions),
         memo(memo)
     {
-        for (size_t i=0; i<g.nvertices;i++) V[i].attach(this, 1 , EVENT_F );
-        for (size_t i=0; i<g.nedges;   i++) E[i].attach(this, 1 , EVENT_F );
+        for (size_t i=0; i<g.nvertices; i++) 
+            V[i].attach(this, 5 , EVENT_L );
+
+        for (size_t v=0; v<g.nvertices; v++) if (g.owners[v]==playerSAT) {
+            for (size_t i=0; i<g.outs[v].size(); i++) {
+                E[v][i].attach(this, 5 , EVENT_L );
+            }            
+        }
     }
 
     //-------------------------------------------------------------------------
@@ -201,14 +201,6 @@ public:
             if (path[i] == vertex) return i;
         }
         return -1;
-    }
-    
-    //-------------------------------------------------------------------------
-    
-    void clausify(vec<int32_t>& path, vec<BoolView> &B, vec<Lit>& lits) {
-        for (size_t i=0; i<path.size()-1; i++) {
-            lits.push(B[path[i]].getValLit());
-        }
     }
     
     //-------------------------------------------------------------------------
@@ -237,30 +229,45 @@ public:
     //-------------------------------------------------------------------------
     
     int filter(vec<int32_t>& pathV, vec<int32_t>& pathE,
-        int32_t v, int32_t lastEdge, bool definedEdge) 
+        int32_t v, int32_t last, bool isFixed) 
     {
         int32_t index = findVertex(v,pathV);
         if (index >= 0) {
-
             if (!satisfiedConditions(pathV,pathE,index)) {
                 vec<Lit> lits;
                 lits.push();
-                clausify(pathE,E,lits);
-                Clause* reason = Reason_new(lits);
-                if (! E[lastEdge].setVal(false,reason)) {
-                    return CF_CONFLICT;
+                for (size_t i=0; i<pathV.size()-1; i++) {
+                    lits.push(V[pathV[i]].getValLit());
+                    if (g.owners[pathV[i]]==playerSAT) {
+                        lits.push(E[pathV[i]][pathE[i]].getValLit());
+                    }
+                }
+                if (g.owners[last]==playerSAT) {
+                    lits.push(V[v].getValLit());
+                    Clause* reason = Reason_new(lits);
+                    if (!E[last][pathE.last()].setVal(false,reason)) {
+                        return CF_CONFLICT;
+                    }
+                } else {
+                    Clause* reason = Reason_new(lits);
+                    if (!V[last].setVal(false,reason)) {
+                        return CF_CONFLICT;
+                    }
                 }
             }
         }
-        else if (definedEdge) {
+        else if (isFixed) {
             pathV.push(v);
             for (size_t i=0; i<g.outs[v].size(); i++) {
                 int32_t e = g.outs[v][i];
-                if (E[e].isFalse()) continue;
+                int32_t w = g.targets[e];
+                if (V[w].isFalse()) continue;
+                if (g.owners[v]==playerSAT && E[v][i].isFalse()) continue;
 
-                int w = g.targets[e];
-                pathE.push(e);
-                int status = filter(pathV, pathE, w, e, E[e].isTrue());
+                isFixed = g.owners[v]==playerSAT ? E[v][i].isTrue() : true;
+
+                pathE.push(i);
+                int status = filter(pathV, pathE, w, v, isFixed);
                 pathE.pop();
                 if (status == CF_CONFLICT) {
                     return status;
@@ -276,7 +283,7 @@ public:
     enum DFSColor { WHITE = 0, GRAY = 1, BLACK = 2 };
 
     int filterMemo(vec<int32_t>& pathV, vec<int32_t>& pathE,
-        int32_t v, int32_t lastEdge, bool definedEdge, vec<DFSColor>& flags)
+        int32_t v, int32_t last, bool isFixed, vec<DFSColor>& flags)
     {
         if (flags[v] == BLACK) {
             return CF_STAY;
@@ -287,28 +294,40 @@ public:
             if (!satisfiedConditions(pathV, pathE, index)) {
                 vec<Lit> lits;
                 lits.push();
-                clausify(pathE, E, lits);
-                Clause* reason = Reason_new(lits);
-                if (!E[lastEdge].setVal(false, reason)) {
-                    return CF_CONFLICT;
+                for (size_t i=0; i<pathV.size()-1; i++) {
+                    lits.push(V[pathV[i]].getValLit());
+                }
+
+                if (g.owners[last]==playerSAT) {
+                    lits.push(V[v].getValLit());
+                    Clause* reason = Reason_new(lits);
+                    if (!E[last][pathE.last()].setVal(false,reason)) {
+                        return CF_CONFLICT;
+                    }
+                } else {
+                    Clause* reason = Reason_new(lits);
+                    if (!V[last].setVal(false,reason)) {
+                        return CF_CONFLICT;
+                    }
                 }
             }
             return CF_STAY;
         }
 
         // flags[v] == WHITE
-        if (definedEdge) {
+        if (isFixed) {
             flags[v] = GRAY;
             pathV.push(v);
 
             for (size_t i = 0; i < g.outs[v].size(); i++) {
                 int32_t e = g.outs[v][i];
-                if (E[e].isFalse()) continue;
+                int32_t w = g.targets[e];
+                if (V[w].isFalse()) continue;
 
-                int w = g.targets[e];
-                pathE.push(e);
-                int status = filterMemo(pathV, pathE, 
-                                        w, e, E[e].isTrue(), flags);
+                isFixed = g.owners[v]==playerSAT ? E[v][i].isTrue() : true;
+
+                pathE.push(i);
+                int status = filterMemo(pathV, pathE, w, v, isFixed, flags);
                 pathE.pop();
 
                 if (status == CF_CONFLICT) {
@@ -360,24 +379,22 @@ public:
 
 class NOCBrancher : public Branching {
 private:
-    Game&           g;
-    vec<BoolView>   V;
-    vec<BoolView>   E;
-    parity_type     playerSAT;
+    Game&               g;
+    vec<BoolView>       V;
+    vec<vec<BoolView>>  E;
+    parity_type         playerSAT;
 public:
     
-    NOCBrancher(Game& g, vec<BoolView>& V, vec<BoolView>& E, 
-        parity_type playerSAT) 
+    NOCBrancher(Game& g, vec<BoolView>& V, vec<vec<BoolView>>& E, parity_type playerSAT) 
     : g(g), V(V), E(E), playerSAT(playerSAT) {}
 
     //-------------------------------------------------------------------------
     
     bool finished() override {
-        for (size_t v = 0; v < V.size(); v++) {
-            if (g.owners[v] == playerSAT && V[v].isFixed() && V[v].isTrue()) {
+        for (size_t v = 0; v < g.nvertices; v++) {
+            if (g.owners[v] == playerSAT && V[v].isTrue()) {
                 for (size_t j = 0; j < g.outs[v].size(); j++) {
-                    int32_t e = g.outs[v][j];
-                    if (!E[e].isFixed()) {
+                    if (!E[v][j].isFixed()) {
                         return false;
                     }
                 }
@@ -395,12 +412,11 @@ public:
     //-------------------------------------------------------------------------
 
     DecInfo* branch() override {
-        for (size_t v=0; v<V.size(); v++) {
-            if (g.owners[v]==playerSAT && V[v].isFixed() && V[v].isTrue()) {
+        for (size_t v=0; v < g.nvertices; v++) {
+            if (g.owners[v]==playerSAT && V[v].isTrue()) {
                 for (size_t j=0; j<g.outs[v].size(); j++) {
-                    int32_t e = g.outs[v][j];
-                    if (!E[e].isFixed()) {
-                        return E[e].branch();
+                    if (!E[v][j].isFixed()) {
+                        return E[v][j].branch();
                     }
                 }
             }
@@ -415,7 +431,7 @@ class NOCModel : public Problem {
 private:
     Game&                   g;
     vec<BoolView>           V;
-    vec<BoolView>           E;
+    vec<vec<BoolView>>      E;
     vec<WinningCondition*>  qlWinConditions;
     std::string             brancherType;
     bool                    propEager,propMemo,propChecker;
@@ -436,7 +452,17 @@ public:
         propEager(propEager), propMemo(propMemo), propChecker(propChecker)
     {
         V.growTo(g.nvertices);
-        E.growTo(g.nedges);
+        E.growTo(g.nvertices);
+
+        for (size_t v=0; v<g.nvertices;  v++) {
+            V[v] = newBoolVar();
+            if (g.owners[v] == playerSAT) {
+                E[v].growTo(g.outs[v].size());
+                for (size_t i=0; i<g.outs[v].size(); i++) {
+                    E[v][i] = newBoolVar();
+                }
+            }
+        }
         setupConstraints();
     }
 
@@ -444,110 +470,98 @@ public:
 
     void setupConstraints() {
 
-        for (size_t i=0; i<g.nvertices;  i++) V[i] = newBoolVar();
-        for (size_t i=0; i<g.nedges;     i++) E[i] = newBoolVar();
-
         // Initial vertex
         fixVertices({g.init},{});
-
+ 
         // --------------------------------------------------------------------
-        // For every active PLAYER vertex, one outgoing edge must be activated
+        // For PLAYER vertices
         for (int32_t v=0; v<g.nvertices; v++) if (g.owners[v] == playerSAT) {
 
-            int32_t n = g.outs[v].size();
-
             // --- At least one -----------------------------------------------
-            if (n == 0) continue;
-
-            {
-                vec<Lit> clause;
-                clause.push( V[v].getLit(false) );
-                for (size_t i=0; i<g.outs[v].size(); i++) {
-                    int32_t e = g.outs[v][i];
-                    clause.push(E[e].getLit(true));
-                }
-                sat.addClause(clause); // E_0 \/ E_1 \/ ... \/ E_n
+            vec<Lit> clause;
+            clause.push( V[v].getLit(false) );
+            for (size_t i=0; i<g.outs[v].size(); i++) {
+                clause.push(E[v][i].getLit(true));
             }
+            sat.addClause(clause);
 
-            // --- At most one ------------------------------------------------
-            if (n == 1) continue;
+            // // --- At most one ------------------------------------------------
+            // int32_t n = g.outs[v].size();
+            // if (n == 1) continue;
 
-            vec<BoolView> s(n - 1);
-            for (size_t j = 0; j < n - 1; j++) s[j] = newBoolVar();
+            // vec<BoolView> s(n - 1);
+            // for (size_t j = 0; j < n-1; j++) s[j] = newBoolVar();
 
-            // First literal
-            {
-                int32_t e = g.outs[v][0];
-                // -E_0 \/ s_0
-                vec<Lit> clause;
-                clause.push(E[e].getLit(false));
-                clause.push(s[0].getLit(true));
-                sat.addClause(clause);
-            }
+            // // First literal // -E_0 \/ s_0
+            // {   
+            //     vec<Lit> clause;
+            //     clause.push(E[v][0].getLit(false));
+            //     clause.push(s[0].getLit(true));
+            //     sat.addClause(clause);
+            // }
 
-            // Middle literals
-            for (size_t i = 1; i < n - 1; i++) {
+            // // Middle literals
+            // for (size_t i = 1; i < n-1; i++) {
+
+            //     // -s_{i-1} \/ s_i
+            //     {
+            //         vec<Lit> clause;
+            //         clause.push(s[i-1].getLit(false));
+            //         clause.push(s[i].getLit(true));
+            //         sat.addClause(clause);
+            //     }
+
+            //     // -E_i \/ -s_{i-1}
+            //     {
+            //         vec<Lit> clause;
+            //         clause.push(E[v][i].getLit(false));
+            //         clause.push(s[i-1].getLit(false));
+            //         sat.addClause(clause);
+            //     }
+
+            //     // -E_i \/ s_i
+            //     {
+            //         vec<Lit> clause;
+            //         clause.push(E[v][i].getLit(false));
+            //         clause.push(s[i].getLit(true));
+            //         sat.addClause(clause);
+            //     }
+            // }
+
+            // // Last literal // -E_{n-1} \/ -s_{n-2}
+            // {
+            //     vec<Lit> clause;
+            //     clause.push(E[v][n-1].getLit(false));
+            //     clause.push(s[n-2].getLit(false));
+            //     sat.addClause(clause);
+            // }            
+        }
+
+        // --------------------------------------------------------------------
+        // For edges out from PLAYER vertices
+        for (size_t v=0; v<g.nvertices; v++) if (g.owners[v]==playerSAT) {
+            for (size_t i=0; i<g.outs[v].size(); i++) {
                 int32_t e = g.outs[v][i];
-
-                // -s_{i-1} \/ s_i
-                {
-                    vec<Lit> clause;
-                    clause.push(s[i - 1].getLit(false));
-                    clause.push(s[i].getLit(true));
-                    sat.addClause(clause);
-                }
-
-                // -E_i \/ -s_{i-1}
-                {
-                    vec<Lit> clause;
-                    clause.push(E[e].getLit(false));
-                    clause.push(s[i - 1].getLit(false));
-                    sat.addClause(clause);
-                }
-
-                // -E_i \/ s_i
-                {
-                    vec<Lit> clause;
-                    clause.push(E[e].getLit(false));
-                    clause.push(s[i].getLit(true));
-                    sat.addClause(clause);
-                }
-            }
-
-            // Last literal
-            {
-                int32_t e_last = g.outs[v][n - 1];
-                // -E_{n-1} \/ -s_{n-2}
+                int32_t w = g.targets[e];
                 vec<Lit> clause;
-                clause.push(E[e_last].getLit(false));
-                clause.push(s[n - 2].getLit(false));
+                clause.push( E[v][i].getLit(false) );
+                clause.push( V[w].getLit(true) );
                 sat.addClause(clause);
             }
         }
 
         // --------------------------------------------------------------------
-        // Every active OPPONENT vertice, each outgoing edge must be activated
+        // For OPPONENT vertices
         for (size_t v=0; v<g.nvertices; v++) {
             if (g.owners[v]==opponent(playerSAT)) {
                 for (size_t i=0; i<g.outs[v].size(); i++) {
                     int32_t e = g.outs[v][i];
+                    int32_t w = g.targets[e];
                     vec<Lit> clause;
-                    clause.push( V[v].getLit(false) );        
-                    clause.push( E[e].getLit(true) );
+                    clause.push(V[v].getLit(false) );        
+                    clause.push(V[w].getLit(true) );
                     sat.addClause(clause);
                 }
-            }
-        }
-
-        // --------------------------------------------------------------------
-        // For every active edge, the target vertex must be activated
-        for (size_t w=0; w<g.nvertices; w++) if (w != g.init) {
-            for (size_t i=0; i<g.ins[w].size(); i++) {
-                int32_t e = g.ins[w][i];
-                vec<Lit> clause;
-                clause.push( E[e].getLit(false) );
-                clause.push( V[w].getLit(true) );
-                sat.addClause(clause);
             }
         }
 
@@ -557,37 +571,42 @@ public:
         if (propEager) {
             if (qlWinConditions.size()>0) 
                 new NOCPropagator(g,V,E,playerSAT,qlWinConditions);
-        } 
+        }
         if (propMemo) {
             if (qlWinConditions.size()>0) 
                 new NOCPropagator(g,V,E,playerSAT,qlWinConditions,true);
         }
         if (propChecker) {
             if (qlWinConditions.size()>0)
-                new NOCCheckerSCC(g,V,E,playerSAT,qlWinConditions[0]);
+                new NOCCheckerSCC(g,V,playerSAT,qlWinConditions[0]);
         }
 
         //---------------------------------------------------------------------
 
+        vec<Branching*> vs(g.nvertices);
+        for (size_t v=0; v<g.nvertices; v++) vs[v] = &V[v];
 
-        vec<Branching*> bv(static_cast<unsigned int>(g.nvertices));
-        vec<Branching*> be(static_cast<unsigned int>(g.nedges));
-        for (size_t i = g.nvertices; (i--) != 0;) bv[i] = &V[i];
-        for (size_t i = g.nedges;    (i--) != 0;) be[i] = &E[i];        
+        vec<Branching*> es;
+        for (size_t v=0; v<g.nvertices; v++) if (g.owners[v]==playerSAT) {
+            for (size_t i=0; i<g.outs[v].size(); i++) {
+                es.push(&E[v][i]);
+            }
+        }
+
         if (brancherType=="reach") {
             engine.branching->add(new NOCBrancher(g,V,E,playerSAT));
         } 
         else if (brancherType=="rand") {
-            branch(bv, VAR_RANDOM, VAL_MIN);
-            branch(be, VAR_RANDOM, VAL_MIN);
-        } 
+            branch(vs, VAR_RANDOM, VAL_MIN);
+            branch(es, VAR_RANDOM, VAL_MIN);
+        }
         else { // if (brancherType=="valmin") 
-            branch(bv, VAR_INORDER, VAL_MIN);
-            branch(be, VAR_INORDER, VAL_MIN);
+            branch(vs, VAR_INORDER, VAL_MIN);
+            branch(es, VAR_INORDER, VAL_MIN);
         }
 
-        output_vars(bv);
-        output_vars(be);
+        output_vars(vs);
+        output_vars(es);
     }
 
     //-------------------------------------------------------------------------
@@ -609,37 +628,12 @@ public:
 
     //-------------------------------------------------------------------------
 
-    void fixEdges(  std::initializer_list<int32_t> es,
-                    std::initializer_list<int32_t> nes={}) 
-    {
-        for (int32_t e : es) {
-            vec<Lit> clause;
-            clause.push(E[e].getLit(true));
-            sat.addClause(clause);
-        }
-        for (int32_t e : nes) {
-            vec<Lit> clause;
-            clause.push(E[e].getLit(false));
-            sat.addClause(clause);
-        }
-    }
-
-    //-------------------------------------------------------------------------
-
     void print(std::ostream& out) override {
         if (printtype) {
             out << "V=[";
             bool first = true;
             for (size_t i=0; i<V.size(); i++) {
                 if (V[i].isTrue()) {
-                    if (first) first=false; else out << ",";
-                    out << i;
-                }
-            }
-            out << "]\nE=[";
-            first = true;
-            for (size_t i=0; i<E.size(); i++) {
-                if (E[i].isTrue()) {
                     if (first) first=false; else out << ",";
                     out << i;
                 }
