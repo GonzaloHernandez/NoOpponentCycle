@@ -173,18 +173,20 @@ bool parseline_gm(const std::string&  line,
     // --- Helper Lambda for Comma-Separated Lists ---
     auto parse_csv_block = [&](auto& target_vec) {
         current = skip_whitespace(line, current);
-        size_t end_of_block = line.find_first_of(" ;\"", current);
+        // The list ends at ';' or at the comment; spaces around the commas
+        // are allowed ("3,7,12" and "3, 7, 12")
+        size_t end_of_block = line.find_first_of(";\"", current);
         if (end_of_block == std::string::npos) end_of_block = line.size();
 
         std::string block = line.substr(current, end_of_block - current);
         std::stringstream ss(block);
         std::string item;
-        
+
         // Identify the internal type T (int8_t, int32_t, int64_t, or float)
         using T = std::decay_t<decltype(target_vec[0])>;
 
         while (std::getline(ss, item, ',')) {
-            if (!item.empty()) {
+            if (item.find_first_not_of(" \t\r") != std::string::npos) {
                 if constexpr (std::is_floating_point_v<T>) {
                     target_vec.push(std::stof(item)); // Chuffed vec uses .push()
                 } else {
